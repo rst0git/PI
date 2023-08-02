@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import queue
+import unittest
 
 import ptf
 from ptf.base_tests import BaseTest
@@ -49,12 +50,9 @@ class partialmethod(partial):
                        *(self.args or ()), **(self.keywords or {}))
 
 # Convert integer (with length) to binary byte string
-# Equivalent to Python 3.2 int.to_bytes
-# See
-# https://stackoverflow.com/questions/16022556/has-python-3-to-bytes-been-back-ported-to-python-2-7
 # TODO: When P4Runtime implementation is ready for it, use
 # minimum-length byte sequences to represent integers.  For unsigned
-# integers, this should only require removing the zfill() call below.
+# integers, this should only require removing the `length` below.
 def stringify(n, length):
     """Take a non-negative integer 'n' as the first parameter, and a
     non-negative integer 'length' in units of _bytes_ as the second
@@ -63,9 +61,7 @@ def stringify(n, length):
     'length' bytes, it is represented in the fewest number of bytes it
     does fit into without loss of precision.  It always returns a
     string at least one byte long, even if value=width=0."""
-    h = '%x' % n
-    s = ('0'*(len(h) % 2) + h).zfill(length*2).decode('hex')
-    return s
+    return int.to_bytes(n, length=length, byteorder='big')
 
 def ipv4_to_binary(addr):
     """Take an argument 'addr' containing an IPv4 address written as a
@@ -663,3 +659,36 @@ def autocleanup(f):
         finally:
             test.undo_write_requests(test._reqs)
     return handle
+
+
+class TestStringify(unittest.TestCase):
+    def test_zero(self):
+        """Test for 0 value"""
+        self.assertEqual(stringify(0, 1), b'\x00')
+        self.assertEqual(stringify(0, 2), b'\x00\x00')
+
+    def test_single_byte(self):
+        """Test for single-byte values"""
+        self.assertEqual(stringify(42, 1), b'*')
+        self.assertEqual(stringify(255, 1), b'\xff')
+
+    def test_multi_byte(self):
+        """Test for multi-byte values"""
+        self.assertEqual(stringify(512, 2), b'\x02\x00')
+        self.assertEqual(stringify(1000, 2), b'\x03\xe8')
+
+    def test_large_value_overflow(self):
+        """Test for a large value that doesn't fit in 'length' bytes"""
+        with self.assertRaises(OverflowError):
+            stringify(1000, 1)
+
+    def test_zero_length(self):
+        """Test for length=0 (should raise OverflowError)"""
+        self.assertEqual(stringify(0, 1), b'\x00')
+        self.assertEqual(stringify(0, 0), b'')
+        with self.assertRaises(OverflowError):
+            stringify(42, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()
